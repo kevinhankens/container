@@ -1,0 +1,414 @@
+<?php
+
+define('GARDENS_TASK_COMPLETE', 0);
+define('GARDENS_TASK_WAITING', 1);
+define('GARDENS_TASK_RUNNING', 2);
+define('GARDENS_TASK_KILLED', 3);
+define('GARDENS_TASK_FAILED', 4);
+define('GARDENS_TASK_UNKNOWN', 5);
+
+/**
+ * Implements hook_init().
+ */
+function container_init() {
+  drupal_add_js(
+    array(
+      'container' => array(
+        'GARDENS_TASK_COMPLETE' => GARDENS_TASK_COMPLETE,
+        'GARDENS_TASK_WAITING' => GARDENS_TASK_WAITING,
+        'GARDENS_TASK_RUNNING' => GARDENS_TASK_RUNNING,
+        'GARDENS_TASK_KILLED' => GARDENS_TASK_KILLED,
+        'GARDENS_TASK_FAILED' => GARDENS_TASK_FAILED,
+        'GARDENS_TASK_UNKNOWN' => GARDENS_TASK_UNKNOWN,
+      ),
+    ), 
+    'setting'
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function container_menu() {
+  return array(
+    'container/sites' => array(
+      'title' => 'Container Sites',
+      'type' => MENU_NORMAL_ITEM,
+      'access arguments' => array('container-manage-sites'),
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('container_site_list'),
+    ),
+    'container/sites/%' => array(
+      'title' => 'Container Sites',
+      'type' => MENU_NORMAL_ITEM,
+      'access arguments' => array('container-manage-sites'),
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('container_site_detail'),
+    ),
+    'container/task/%' => array(
+      'title' => 'Container Sites',
+      'type' => MENU_CALLBACK,
+      'access arguments' => array('container-manage-sites'),
+      'page callback' => 'container_task_ajax',
+      'page arguments' => array(2),
+    ),
+  );
+}
+
+/**
+ *
+ */
+function container_permission() {
+  return array(
+    'container-manage-sites' => array(
+      'title' => 'Manage Container Sites',
+      'description' => 'CRUD and message operations',
+    ),
+  );
+}
+
+/**
+ *
+ */
+function container_site_list($form, $form_state) {
+  $server = new ContainerServer();
+
+  $site_list = array();
+  foreach($server->sites() as $site) {
+    $site_list[] = array(
+      array(
+        'data' => l($site->dirname, 'container/sites/' . $site->dirname), 
+        'data-site' => $site->dirname,
+        'class' => array('container_site_name'),
+      ),
+      $server->siteStatus($site) ? t('Online') : t('Offline'),
+    );
+  }
+
+  $form = array();
+
+  $form['list'] = array(
+    '#theme' => 'table',
+    '#header' => array(
+      array('data' => 'Name'),
+      array('data' => 'Status'),
+    ),
+    '#rows' => $site_list,
+  );
+
+  $form['drush'] = array(
+    '#attached' => array('js' => array(drupal_get_path('module', 'container') . '/js/task.js')),
+    '#type' => 'fieldset',
+    '#tree' => TRUE,
+    '#title' => t('Execute Drush on All Sites'),
+  );
+  $form['drush']['command'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Command'),
+  );
+  $form['drush']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Execute'),
+    '#submit' => array('container_site_drush_all'),
+    '#ajax' => array(
+      'callback' => 'container_site_drush_all',
+      'wrapper' => 'drush-command-output',
+      'method' => 'replace',
+      'effect' => 'fade',
+    ),
+  );
+
+  if (isset($form_state['command_output'])) {
+    $form['drush']['command_output'] = $form_state['command_output'];
+  }
+  else {
+    $form['drush']['command_output'] = array(
+      '#type' => 'markup',
+      '#markup' => '<div id="drush-command-output"></div>',
+    );
+  }
+
+  $form['new'] = array(
+    '#type' => 'fieldset',
+    '#tree' => TRUE,
+    '#title' => t('New Site'),
+  );
+  $form['new']['site'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Site Name'),
+  );
+  $form['new']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Create'),
+    '#submit' => array('container_site_list_new_site'),
+  );
+
+  return $form;
+}
+
+/**
+ *
+ */
+function container_site_list_new_site($form, &$form_state) {
+  $site = new ContainerSite($form_state['values']['new']['site']);
+  $server = new ContainerServer();
+  if (!$server->createSite($site)) {
+    form_set_error();
+  }
+
+  drupal_set_message($form_state['values']['new']['site']);
+}
+
+/**
+ *
+ */
+function container_site_detail($form, $form_state) {
+  $name = isset($form_state['values']['site']) ? $form_state['values']['site'] : arg(2);
+  $site = new ContainerSite($name);
+  $server = new ContainerServer();
+  $st = $server->siteDrush($site, 'st');
+  include('sites/' . $site->dirname . '/container.php');
+
+  $form['site_info'] = array(
+    '#type' => 'markup',
+    '#markup' => '<h2>' . $name . '</h2>' . implode('<br />', $st['output']),
+  );
+
+  $form['site'] = array(
+    '#type' => 'value',
+    '#value' => $name,
+  );
+
+  $form['drush'] = array(
+    '#attached' => array('js' => array(drupal_get_path('module', 'container') . '/js/task.js')),
+    '#type' => 'fieldset',
+    '#tree' => TRUE,
+    '#title' => t('Execute Drush on All Sites'),
+  );
+  $form['drush']['command'] = array(
+    '#type' => 'textfield',
+    '#size' => '155',
+    '#maxlength' => '512',
+    '#title' => t('Drush command to execute'),
+    '#description' => "<ul>
+      <li>cc all</li>
+      <li>si minimal --sites-subdir={$site->dirname} --site-name={$site->dirname} --account-name=admin --account-pass=pass --db-url=mysql://$container_db:$container_db@localhost:3306/$container_db --yes</li>
+    </ul>",    
+  );
+
+  $form['drush']['execute'] = array(
+    '#type' => 'submit',
+    '#value' => t('Execute'),
+    '#submit' => array('container_site_drush'),
+    '#ajax' => array(
+      'callback' => 'container_site_drush',
+      'wrapper' => 'drush-command-output',
+      'method' => 'replace',
+      'effect' => 'fade',
+    ),
+  );
+
+  if (isset($form_state['command_output'])) {
+    $form['drush']['command_output'] = $form_state['command_output'];
+  }
+  else {
+    $form['drush']['command_output'] = array(
+      '#type' => 'markup',
+      '#markup' => '<div id="drush-command-output"></div>',
+    );
+  }
+
+  return $form;
+}
+
+/**
+ *
+ */
+function container_site_drush_all($form, &$form_state) {
+  $server = new ContainerServer();
+
+  $output = array();
+  foreach ($server->sites() as $site) {
+    $drush = $server->siteDrush($site, $form_state['values']['drush']['command']);
+    $output[] = array($site->dirname, implode('<br />', $drush['output']) . implode('<br />', $drush['error']));
+  }
+
+  $form_state['rebuild'] = TRUE;
+  $form_state['command_output'] = array(
+    '#prefix' => '<div id="drush-command-output">',
+    '#suffix' => '</div>',
+    '#theme' => 'table',
+    '#header' => array('Site', 'Output'),
+    '#rows' => $output,
+  );
+
+  if (!empty($form_state['input']['ajax_page_state'])) {
+    return drupal_render($form_state['command_output']);
+  }
+}
+
+/**
+ *
+ */
+function container_site_drush($form, &$form_state) {
+  $site = new ContainerSite($form_state['values']['site']);
+  $server = new ContainerServer();
+
+  $drush = $server->siteDrush($site, $form_state['values']['drush']['command']);
+
+  $output = implode('<br />', $drush['output']) . implode('<br />', $drush['error']);
+
+  $form_state['rebuild'] = TRUE;
+  $form_state['command_output'] = array(
+    '#prefix' => '<div id="drush-command-output">',
+    '#suffix' => '</div>',
+    '#type' => 'markup',
+    '#markup' => $output,
+  );
+
+  if (!empty($form_state['input']['ajax_page_state'])) {
+    return drupal_render($form_state['command_output']);
+  }
+}
+
+function container_task_ajax($action) {
+  $name = isset($_POST['name']) ? $_POST['name'] : NULL;
+  $command = isset($_POST['command']) ? $_POST['command'] : NULL;
+  $sites = isset($_POST['sites']) ? $_POST['sites'] : NULL;
+
+  drupal_json_output(container_task($action, $name, $command, $sites));
+  exit();
+}
+
+/**
+ *
+ */
+function container_task($action, $name = NULL, $command = NULL, $sites = array()) {
+  // @todo this should be abstracted up a level so that it can be initiated via
+  // drush or via a POST request - using abstract variables and responses.
+  $server = new ContainerServer();
+
+  switch ($action) {
+    case 'init':
+      // Initiating a task means that we have to first insert each
+      // task in the db so that we can monitor its status.
+      $insert = 0;
+      $tasks = array();
+      foreach ($sites as $site) {
+        $task = array(
+          'name' => $name, 
+          'site' => $site, 
+          'task' => $command, 
+          'status' => GARDENS_TASK_WAITING,
+          'timestamp' => time(),
+        );
+        $tasks[] = $task;
+        $insert = db_insert('container_task')
+          ->fields($task)
+          ->execute();
+      }
+
+      // After inserting the tasks, we'll kick off our parent drush task
+      // in the background that will churn through the list of tasks
+      $include = DRUPAL_ROOT . '/' . drupal_get_path('module', 'container');
+      $cmd = 'drush --include=' . $include . ' container-task exec --name=' . escapeshellarg($name);
+      $cmd .= ' > /dev/null 2>/dev/null &'; // Run in the background.
+      $server->shellCommand($cmd);
+      return array('insert' => $insert, 'command' => $cmd);
+    case 'exec':
+      // Executing a task means that we pull all tasks marked as waiting
+      // and fire off drush commands for each. This is the "long running"
+      // command that keeps track of the overall status and output.
+      // @todo threading the commands
+      $status_id = db_insert('container_task_status')
+        ->fields(array(
+          'name' => $name,
+          'status' => GARDENS_TASK_RUNNING,
+          'output' => container_task_table(),
+          'started' => time(),
+          'completed' => 0,
+        ))
+        ->execute();
+
+      $tasks = db_query('SELECT * FROM {container_task} WHERE name = :name AND status = :status', array(':name' => $name, ':status' => GARDENS_TASK_WAITING));
+      foreach ($tasks as $task) {
+        // Execute the drush command on each site.
+        container_task_mark_status($name, $site, GARDENS_TASK_RUNNING);
+        $st = $server->siteDrush(new ContainerSite($task->site), $task->task);
+        $output[] = array($task->site, $task->task, implode('<br />', $st['output']));
+        // Mark the task as complete
+        // @todo we need error handling here.
+        container_task_mark_status($name, $site, GARDENS_TASK_COMPLETE);
+        // Update container_task_status with the current status.
+        db_update('container_task_status')
+          ->fields(array(
+            'output' => container_task_table($output),
+          ))
+          ->condition('name', $name)
+          ->execute();
+      }
+
+      // Mark the task as complete.
+      db_update('container_task_status')
+        ->fields(array(
+          'status' => GARDENS_TASK_COMPLETE,
+          'completed' => time(),
+        ))
+        ->condition('name', $name)
+        ->execute();
+
+      return 0;
+    case 'kill':
+      // Mark the task as killed.
+      db_update('container_task_status')
+        ->fields(array(
+          'status' => GARDENS_TASK_KILLED,
+          'completed' => time(),
+        ))
+        ->condition('name', $name)
+        ->execute();
+
+      // Mark the status as killed.
+      db_update('container_task')
+        ->fields(array(
+          'status' => GARDENS_TASK_KILLED,
+          'completed' => time(),
+        ))
+        ->condition('name', $name)
+        ->execute();
+
+      break;
+    case 'stat':
+      $status = (array) db_query('SELECT * FROM {container_task_status} WHERE name = :name', array(':name' => $name))->fetch();
+      if (empty($status)) {
+        $status = array('status' => GARDENS_TASK_UNKNOWN);
+      }
+      return $status;
+  }
+}
+
+/**
+ *
+ */
+function container_task_table($rows = array()) {
+  $table = array(
+    '#theme' => 'table',
+    '#header' => array(t('site'), t('task'), t('output')),
+    '#rows' => $rows,
+  );
+
+  return drupal_render($table);
+}
+
+/**
+ *
+ */
+function container_task_mark_status($name, $site, $status) {
+  db_update('container_task')
+    ->fields(array(
+      'status' => $status,
+    ))
+    ->condition('name', $name)
+    ->condition('site', $site)
+    ->execute();
+}

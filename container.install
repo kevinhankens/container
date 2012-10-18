@@ -1,0 +1,85 @@
+<?php
+
+/**
+ * Implements hook_install().
+ */
+function container_install() {
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function container_uninstall() {
+}
+
+/**
+ * Implements hook_schema().
+ */
+function container_schema() {
+  $schema = array();
+
+  $schema['container_task_status'] = array(
+    'description' => 'Monitor task status.',
+    'fields' => array(
+      'tid' => array(
+        'type' => 'serial',
+      ),
+      'name' => array(
+        'type' => 'varchar',
+        'length' => 64,
+      ),
+      'status' => array(
+        'type' => 'int',
+      ),
+      'started' => array(
+        'type' => 'int',
+      ),
+      'completed' => array(
+        'type' => 'int',
+      ),
+      'output' => array(
+        'type' => 'text',
+      ),
+    ),
+    'indexes' => array(
+      'name' => array('name'),
+    ),
+    'primary key' => array('tid'),
+  );
+
+  $schema['container_task'] = array(
+    'description' => 'Manage tasks in the background.',
+    'fields' => array(
+      'tid' => array(
+        'type' => 'serial',
+      ),
+      'name' => array(
+        'type' => 'varchar',
+        'length' => 64,
+      ),
+      'site' => array(
+        'type' => 'varchar',
+        'length' => 255,
+      ),
+      'task' => array(
+        'type' => 'varchar',
+        'length' => 255,
+      ),
+      'status' => array(
+        'type' => 'int',
+      ),
+      'timestamp' => array(
+        'type' => 'int',
+        'length' => 11,
+        'signed' => FALSE,
+        'not null' => TRUE,
+      ),
+    ),
+    'indexes' => array(
+      'name' => array('name'),
+    ),
+    'primary key' => array('tid'),
+  );
+
+  return $schema;
+}

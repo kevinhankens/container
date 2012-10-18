@@ -1,0 +1,25 @@
+Gardens Pivot Todo
+------------------
+
+Hurdles
+-------
+- MySQL db/user creation
+  - PHP file containing db creds for pre-install?
+  - install drupal on new site creation?
+- Apache-writable sites/ dir
+- Apache virtualhost entries?
+
+Queue
+-----
+- Form allows you to name a job(drush command)
+- Callback/Webservice executes drush command in the background and exits
+- Drush command executes a drush command on one or all sites
+- Parent drush command records all of the subsequent job names and commands into a queue table
+- Parent drush command then iterates over all queue items, marking them as complete
+- JS can call another callback/webservice to get status on the queue
+
+
+
+
+
+

@@ -1,0 +1,5 @@
+name = Container
+description = Manage Drupal Multisite
+core = 7.x
+files[] = site.class.inc
+files[] = server.class.inc
